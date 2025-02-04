@@ -1,0 +1,11 @@
+---
+- hosts: all
+  roles:
+    - role: /var/lib/jenkins/workspace/GOAD/ansible/roles/common
+
+
+- hosts: domain_controllers
+  roles:
+    - role: /var/lib/jenkins/workspace/GOAD/ansible/roles/ADDS
+      tags:
+        - ADDS

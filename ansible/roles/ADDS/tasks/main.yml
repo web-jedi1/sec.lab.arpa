@@ -1,0 +1,122 @@
+---
+- name: Ensure directories exist for PowerShell library files
+  ansible.windows.win_file:
+    path: "{{ item.dest }}"
+    state: directory
+  loop:
+    - { dest: "C:\\Program Files\\WindowsPowerShell\\Modules\\SECEnvHelpers" }
+    - { dest: "C:\\Program Files\\WindowsPowerShell\\Modules\\SECHashiVault" }
+    - { dest: "C:\\Program Files\\WindowsPowerShell\\Modules\\SECActiveDirectory" }
+
+
+- name: Copy required Powershell library files
+  ansible.windows.win_copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+  loop:
+    - src: "SECEnvHelpers.psm1"
+      dest: C:\Program Files\WindowsPowerShell\Modules\SECEnvHelpers\SECEnvHelpers.psm1
+    - src: "SECHashiVault.psm1"
+      dest: "C:\\Program Files\\WindowsPowerShell\\Modules\\SECHashiVault\\SECHashiVault.psm1"
+    - src: "SECActiveDirectory.psm1"
+      dest: "C:\\Program Files\\WindowsPowerShell\\Modules\\SECActiveDirectory\\SECActiveDirectory.psm1"
+
+- name: Install ADDSForest and DNS
+  ansible.windows.win_powershell:
+    script: |
+      [CmdletBinding()]
+      param(
+          [ValidatePattern('^[a-zA-Z\.]+$')]
+          [Parameter(Position=0,Mandatory=$True)]
+          [string]$DomainName,
+          [ValidateNotNullOrEmpty()]
+          [string]$Token,
+          [ValidateNotNullOrEmpty()]
+          [string]$Endpoint = "https://vault.lab.arpa:8200",
+          [ValidateNotNullOrEmpty()]
+          [string]$Path = "/v1/kv/data/sec-lab-arpa/SafeModeAdministrator"        
+      )
+
+      try {
+        Import-Module SECEnvHelpers
+        Import-Module SECHashiVault
+      } catch {
+        $_; exit 1
+      }
+
+      if ((Get-WindowsFeature AD-Domain-Services | Select -ExpandProperty Installed) -eq $False) {
+        Install-WindowsFeature AD-Domain-Services
+      }
+
+      if ((Get-WmiObject Win32_ComputerSystem | Select-Object -ExpandProperty Domain) -ne $DomainName) {
+        	try {
+            SEC-WriteVaultSecret `
+                -Endpoint $Endpoint `
+                -Path $Path `
+                -Token $Token `
+                -Secret  @{ "password": $(SEC-GeneratePassword -Length 64) } 
+          } catch {
+            $_; $Ansible.Failed = $True
+          } 
+
+          if ($(SEC-ReadVaultSecret `
+                    -Endpoint $Endpoint `
+                    -Path $Path `
+                    -Token $Token)["data"]["data"]["password"]) -eq $NULL) {
+            $_; $Ansible.Failed = $True          
+          }
+        
+          $ADDSArgs = @{
+              DomainMode                    = "Default"
+              DomainName                    = $DomainName
+              ForestMode                    = "Default"
+              InstallDns                    = $True
+              SafeModeAdministratorPassword = ConvertTo-SecureString $(SEC-ReadVaultSecret `
+                    -Endpoint $Endpoint `
+                    -Path $Path `
+                    -Token $Token)["data"]["data"]["password"]) -AsPlainText -Force
+          }
+
+          try {
+              Install-ADDSForest @ADDSArgs -Confirm:$False -Force
+              $Ansible.Changed = $True
+          } catch {
+              Write-Error "Error Installing ADDSForest: $_"
+              $Ansible.Failed = $True; $Ansible.Changed = $False
+          }
+      } else {
+          $Ansible.Changed = $False
+      }
+
+    parameters:
+      DomainName: "{{ domain_name }}"
+      Token: "{{ vault_token }}"
+  notify:
+    - Reboot
+
+- name: Create Domain Join Account
+  ansible.windows.win_powershell:
+    script: |
+      [CmdletBinding()]
+      param(
+          [ValidatePattern('^[a-zA-Z-\$]+$')]
+          [Parameter(Position=0,Mandatory=$True)]
+          [string]$UserName
+          [ValidateNotNullOrEmpty()]
+          [Parameter(Position=1,Mandatory=$True)]
+          [string]$Token
+      )
+
+      try {
+        Import-Module SECActiveDirectory
+      } catch {
+        $_; $Ansible.Failed = $True
+      }
+
+      try {
+        SEC-CreateUser -UserName "svc-domainjoin" -Token $Token
+      }
+
+    parameters:
+      UserName: "svc-domainjoin"
+      Token: "{{ vault_token }}"

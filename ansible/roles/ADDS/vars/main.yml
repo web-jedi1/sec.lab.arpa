@@ -1,0 +1,2 @@
+domain_name: sec.lab.arpa
+roles_root: /var/lib/jenkins/workspace/GOAD/ansible/roles
