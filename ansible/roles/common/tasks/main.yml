@@ -1,14 +1,22 @@
 ---
 - name: Disable Cloudbase-Init Service
   ansible.windows.win_powershell:
-    script: |
-      Get-Service cloudbase-init | % {
-        if ($_.StartType -eq "Automatic") {
+  script: |
+    Get-Service cloudbase-init | % {
+      if ($_.StartType -eq "Automatic") {
+        try {
           Set-Service cloudbase-init -StartupType "Manual"
+          $Ansible.Changed = $True
+        } catch {
+          $_; $Ansible.Failed = $True
         }
+      } else {
+        continue
+        $Ansible.Changed = $False
       }
+    }
 
 - name: Set Hostname
   ansible.windows.win_hostname:
     name: "{{ inventory_hostname }}"
-  notify: Reboot
+  nofity: Reboot
