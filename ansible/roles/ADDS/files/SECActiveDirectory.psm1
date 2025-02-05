@@ -7,7 +7,7 @@ function SEC-CreateUser {
     param(
         [ValidatePattern('^[a-zA-Z-\$]+$')]
         [Parameter(Position=0,Mandatory=$True)]
-        [string]$UserName
+        [string]$UserName,
         [ValidateNotNullOrEmpty()]
         [Parameter(Position=1,Mandatory=$True)]
         [string]$Token,
@@ -29,34 +29,38 @@ function SEC-CreateUser {
 
     $Path = "/v1/kv/data/sec-lab-arpa/$UserName"
 
-    SEC-WriteVaultSecret `
-        -Endpoint $Endpoint `
-        -Path $Path `
-        -Token $Token `
-        -Secret  @{ "password": SEC-GeneratePassword } 
-
     try {
         if (Get-ADUser -Identity $UserName -ErrorAction Stop) {
             if ($ResetUser) {
-                Set-ADAccountPassword -Identity $UserName -Password $(
-                ConvertTo-SecureString `
-                $(SEC-ReadVaultSecret `
+                SEC-WriteVaultSecret `
                     -Endpoint $Endpoint `
                     -Path $Path `
-                    -Token $Token)["data"]["data"]["password"] `
-                -AsPlainText -Force)
+                    -Token $Token `
+                    -Secret  @{ "password" = SEC-GeneratePassword }
+                Set-ADAccountPassword -Identity $UserName -Password $(
+                    ConvertTo-SecureString `
+                    $(SEC-ReadVaultSecret `
+                        -Endpoint $Endpoint `
+                        -Path $Path `
+                        -Token $Token)["data"]["data"]["password"] `
+                    -AsPlainText -Force)
             } else {
-                continue
+                return
             }
         }
     } catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+        SEC-WriteVaultSecret `
+            -Endpoint $Endpoint `
+            -Path $Path `
+            -Token $Token `
+            -Secret  @{ "password" = SEC-GeneratePassword } 
         New-ADUser `
             -SamAccountName $UserName `
             -Name $UserName `
             -ChangePasswordAtLogon:$False `
             -PasswordNeverExpires:$True
         Set-ADAccountPassword -Identity $UserName -Password $(
-            ConvertTo-SecureString
+            ConvertTo-SecureString `
             $(SEC-ReadVaultSecret `
                 -Endpoint $Endpoint `
                 -Path $Path `

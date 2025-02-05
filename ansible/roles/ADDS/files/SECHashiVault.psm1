@@ -13,7 +13,10 @@ function SEC-ReadVaultSecret {
         [string]$Path,
         [ValidateNotNullOrEmpty()]
         [Parameter(Position=2, Mandatory=$True)]
-        [string]$Token
+        [string]$Token,
+        [ValidateNotNullOrEmpty()]
+        [Parameter(Position=3, Mandatory=$False)]
+        [bool]$SecureString = $True # add logic to return secure string version of password?
     )
 
     $headers = @{
